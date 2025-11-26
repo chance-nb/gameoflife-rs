@@ -1,3 +1,8 @@
+use bitvec::index::BitIdx;
+use bitvec::order::Msb0;
+use bitvec::store::BitStore;
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::ops::Not;
 use three_d::{CpuTexture, GUI, Key, PhysicalPoint, ScissorBox, egui, vec4};
 
@@ -64,13 +69,13 @@ impl<T> SwapItem<T> {
         self.active = !self.active;
     }
     /// Returns the textures of this as a tuple (`primary`, `secondary`)
-    fn textures(&mut self) -> (&mut T, &mut T) {
+    fn get_both_mut(&mut self) -> (&mut T, &mut T) {
         match self.active {
             ActiveItem::A => (&mut self.item_a, &mut self.item_b),
             ActiveItem::B => (&mut self.item_b, &mut self.item_a),
         }
     }
-    fn get_active(&mut self) -> &mut T {
+    fn get_active_mut(&mut self) -> &mut T {
         match self.active {
             ActiveItem::A => &mut self.item_a,
             ActiveItem::B => &mut self.item_b,
@@ -81,7 +86,9 @@ impl<T> SwapItem<T> {
 pub struct ConwaysGameOfLife {
     grid_size: Vector2<u32>,
     config_grid_size: Vector2<u32>,
-    should_remake_grid: bool,
+    should_resize_grid: bool,
+    should_save: bool,
+    should_load: bool,
     conway_texture: SwapItem<Texture2D>,
     conway_program: Program,
     zoom_program: Program,
@@ -158,7 +165,9 @@ impl ConwaysGameOfLife {
         Self {
             grid_size: DEFAULT_GRID_SIZE,
             config_grid_size: DEFAULT_GRID_SIZE,
-            should_remake_grid: false,
+            should_resize_grid: false,
+            should_save: false,
+            should_load: false,
             conway_texture,
             conway_program,
             zoom_program,
@@ -211,13 +220,14 @@ impl ConwaysGameOfLife {
 
         SwapItem::new(texture_a, texture_b)
     }
-    fn remake_grid(&mut self, context: &Context) {
-        self.should_remake_grid = false;
 
-        // get the current grid
+    fn resize_grid(&mut self, context: &Context) {
+        self.should_resize_grid = false;
+
+        // die Daten des Rasters holen
         let raw_data = self
             .conway_texture
-            .get_active()
+            .get_active_mut()
             .as_color_target(None)
             .read();
 
@@ -260,15 +270,106 @@ impl ConwaysGameOfLife {
                 height: (new_grid_size.y as f64 / ratio_y) as u32,
             };
             self.config_grid_size = new_grid_size;
-            self.remake_grid(context);
+            self.resize_grid(context);
         }
         self.resized = true;
     }
 
+    // storage format: 4 bytes width
+    //                 4 bytes height
+    //                 ceil((width*height)/8) bytes, last byte is padded with 0s
+    pub fn save(&mut self) -> std::io::Result<()> {
+        let file = rfd::FileDialog::new()
+            .add_filter("gaofli", &["conway-rs"])
+            .set_title("Save State as")
+            .save_file()
+            .ok_or(std::io::Error::new(
+                std::io::ErrorKind::InvalidFilename,
+                "Couldn't pick file path",
+            ))?;
+
+        let current_state: Vec<u8> = self
+            .conway_texture
+            .get_active_mut()
+            .as_color_target(None)
+            .read();
+
+        let num_cells = self.grid_size.x * self.grid_size.y;
+        let mut bitified_state: Vec<u8> = Vec::new();
+        let mut curr_u8 = 0u8;
+        for (i, cell) in current_state.iter().enumerate() {
+            if i % 8 == 0 && i != 0 {
+                bitified_state.push(curr_u8);
+                curr_u8 = 0;
+            }
+            curr_u8 <<= 1;
+
+            if *cell == 255 {
+                curr_u8 += 1;
+            }
+        }
+        if !num_cells.is_multiple_of(8) {
+            curr_u8 <<= 8 - (num_cells % 8);
+        }
+        bitified_state.push(curr_u8);
+
+        let mut file = BufWriter::new(File::create(file)?);
+
+        file.write_all(&self.grid_size.x.to_be_bytes())?;
+        file.write_all(&self.grid_size.y.to_be_bytes())?;
+
+        file.write_all(bitified_state.as_slice())?;
+
+        Ok(())
+    }
+
+    pub fn load(&mut self, context: &Context) -> std::io::Result<()> {
+        let file = rfd::FileDialog::new()
+            .add_filter("conway-rs", &["conway-rs"])
+            .set_title("Save State as")
+            .pick_file()
+            .ok_or(std::io::Error::new(
+                std::io::ErrorKind::InvalidFilename,
+                "Couldn't pick file path",
+            ))?;
+
+        let mut file = BufReader::new(File::open(file)?).bytes();
+
+        macro_rules! next_byte {
+            () => {
+                file.next().ok_or(std::io::Error::new(
+                    std::io::ErrorKind::InvalidFilename,
+                    "Missing Data",
+                ))??
+            };
+        }
+
+        let width = u32::from_be_bytes([next_byte!(), next_byte!(), next_byte!(), next_byte!()]);
+        let height = u32::from_be_bytes([next_byte!(), next_byte!(), next_byte!(), next_byte!()]);
+
+        let mut data: Vec<u8> = Vec::new();
+        for byte in file.flatten() {
+            for i in BitIdx::range_all() {
+                data.push(if byte.get_bit::<Msb0>(i) { 255u8 } else { 0u8 })
+            }
+        }
+
+        data.truncate(width as usize * height as usize);
+
+        let size = vec2(width, height);
+        self.conway_texture = Self::make_texture(size, context, data);
+        self.config_grid_size = size;
+        self.grid_size = size;
+
+        Ok(())
+    }
+
+    // Die wichtigste methode - hier wird ein neues Frame gerendert
     pub fn render_frame(&mut self, frame_input: &mut FrameInput) -> bool {
         if self.frame_rate != 0. && !self.paused {
             self.frame_time += frame_input.elapsed_time;
         }
+
         let mut need_rerender = self.gui.update(
             &mut frame_input.events,
             frame_input.accumulated_time,
@@ -294,35 +395,60 @@ impl ConwaysGameOfLife {
                             .text("Grid height"),
                     );
                     if ui.add(Button::new("Apply Grid Size")).clicked() {
-                        self.should_remake_grid = true;
+                        self.should_resize_grid = true;
                     }
                     if ui.add(Button::new("Rerandomize")).clicked() {
                         self.conway_texture
-                            .get_active()
+                            .get_active_mut()
                             .fill(&Self::generate_random_conway_data(self.grid_size));
                     }
                     if ui.add(Button::new("Clear")).clicked() {
                         self.conway_texture
-                            .get_active()
+                            .get_active_mut()
                             .fill(&Self::generate_empty_conway_data(self.grid_size));
+                    }
+                    if ui.add(Button::new("Save")).clicked() {
+                        self.should_save = true;
+                    }
+                    if ui.add(Button::new("Load")).clicked() {
+                        self.should_load = true;
                     }
                     ui.add(Checkbox::new(&mut self.paused, "Pause")).clicked();
                 });
             },
         );
 
+        if self.should_save {
+            self.should_save = false;
+            match self.save() {
+                Ok(_) => println!("saved succesfully!"),
+                Err(e) => println!("{}", e),
+            };
+        }
+
+        if self.should_load {
+            self.should_load = false;
+            match self.load(&frame_input.context) {
+                Ok(_) => {
+                    println!("loaded succesfully!");
+                    self.paused = true;
+                }
+                Err(e) => println!("{}", e),
+            }
+        }
+
         need_rerender |= self.handle_events(&frame_input.events, frame_input);
 
         let target_time_per_frame = (1.0 / self.frame_rate) * 1000.;
         let update_sim = self.frame_time >= target_time_per_frame && !self.paused;
-        if self.should_remake_grid {
-            self.remake_grid(&frame_input.context);
+        if self.should_resize_grid {
+            self.resize_grid(&frame_input.context);
             self.zoom = vec3(0., 0., 1.);
         }
         if update_sim {
             self.frame_time -= target_time_per_frame;
             {
-                let (active, inactive) = self.conway_texture.textures();
+                let (active, inactive) = self.conway_texture.get_both_mut();
                 // inactive.fill(&conway_data_empty);
                 let conway_target = inactive.as_color_target(None);
                 conway_target
@@ -359,7 +485,7 @@ impl ConwaysGameOfLife {
                     self.zoom_program
                         .use_vertex_attribute("position", &self.fullscreen_quad);
                     self.zoom_program
-                        .use_texture("conway", self.conway_texture.get_active());
+                        .use_texture("conway", self.conway_texture.get_active_mut());
                     self.zoom_program.use_uniform("zoom", self.zoom);
                     // self.zoom_program
                     //     .use_uniform("time", frame_input.accumulated_time as f32 / 1000.);
@@ -401,7 +527,7 @@ impl ConwaysGameOfLife {
             width: 1,
             height: 1,
         };
-        let tex = self.conway_texture.get_active();
+        let tex = self.conway_texture.get_active_mut();
         tex.as_color_target(None)
             .write_partially::<CoreError>(sbox, || {
                 self.edit_program
