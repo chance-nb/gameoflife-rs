@@ -1,12 +1,13 @@
+#![warn(clippy::all, clippy::pedantic, clippy::nursery)]
+
 use three_d::{FrameInputGenerator, SurfaceSettings, WindowedContext};
 use winit::{
     dpi::PhysicalSize, event::Event, event_loop::EventLoop,
-    platform::wayland::WindowBuilderExtWayland, window::WindowBuilder,
+    platform::wayland::WindowBuilderExtWayland as _, window::WindowBuilder,
 };
 
-use crate::game_of_life::ConwaysGameOfLife;
-
 mod game_of_life;
+use crate::game_of_life::ConwaysGameOfLife;
 
 fn main() {
     const INIT_WINDOW_SIZE: PhysicalSize<u32> = PhysicalSize::new(1000, 1000);
@@ -38,8 +39,8 @@ fn main() {
             let need_redraw = conways_game_of_life.render_frame(&mut frame_input);
             if need_redraw {
                 match context.swap_buffers() {
-                    Ok(_) => {}
-                    Err(e) => println!("ERROR: Failed to swap Framebuffers: {}", e),
+                    Ok(()) => {}
+                    Err(e) => println!("ERROR: Failed to swap Framebuffers: {e}"),
                 }
             }
             control_flow.set_poll();
