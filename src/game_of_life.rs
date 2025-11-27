@@ -93,6 +93,8 @@ pub struct ConwaysGameOfLife {
     should_resize_grid: bool,
     should_save: bool,
     should_load: bool,
+    should_load_last: bool,
+    last_loaded_file: Option<PathBuf>,
     conway_texture: SwapItem<Texture2D>,
     conway_program: Program,
     zoom_program: Program,
@@ -171,6 +173,8 @@ impl ConwaysGameOfLife {
             should_resize_grid: false,
             should_save: false,
             should_load: false,
+            should_load_last: false,
+            last_loaded_file: None,
             conway_texture,
             conway_program,
             zoom_program,
@@ -351,6 +355,7 @@ impl ConwaysGameOfLife {
     }
 
     pub fn load_file(&mut self, file: PathBuf, context: &Context) -> std::io::Result<()> {
+        self.last_loaded_file = Some(file.clone());
         let mut file = BufReader::new(File::open(file)?).bytes();
 
         macro_rules! next_byte {
@@ -407,6 +412,18 @@ impl ConwaysGameOfLife {
                     println!("loaded succesfully!");
                 }
                 Err(e) => println!("{e}"),
+            }
+        }
+
+        if self.should_load_last {
+            self.should_load_last = false;
+            if let Some(file) = &self.last_loaded_file {
+                match self.load_file(file.clone(), &frame_input.context) {
+                    Ok(()) => {
+                        println!("loaded succesfully!");
+                    }
+                    Err(e) => println!("{e}"),
+                }
             }
         }
 
@@ -524,6 +541,11 @@ impl ConwaysGameOfLife {
                     }
                     if ui.add(Button::new("Load")).clicked() {
                         self.should_load = true;
+                    }
+                    if self.last_loaded_file.is_some()
+                        && ui.add(Button::new("Load last opened")).clicked()
+                    {
+                        self.should_load_last = true;
                     }
                     ui.add(Checkbox::new(&mut self.paused, "Pause")).clicked();
                 });
