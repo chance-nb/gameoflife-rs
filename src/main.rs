@@ -30,6 +30,16 @@ fn main() {
 
     let mut conways_game_of_life = ConwaysGameOfLife::new(&context, INIT_WINDOW_SIZE);
 
+    if let Some(file_to_load) = std::env::args().nth(1) {
+        match conways_game_of_life.load_file(file_to_load.into(), &context) {
+            Ok(()) => {}
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => println!("Couldn't load file: File not found"),
+                _ => println!("Couldn't load file: {e}"),
+            },
+        }
+    }
+
     let mut frame_input_generator = FrameInputGenerator::from_winit_window(&window);
 
     event_loop.run(move |event, _, control_flow| match event {

@@ -5,6 +5,7 @@ use bitvec::store::BitStore as _;
 use core::ops::Not;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read as _, Write as _};
+use std::path::PathBuf;
 use three_d::{CpuTexture, GUI, Key, PhysicalPoint, ScissorBox, egui, vec4};
 
 use three_d::core::{ClearState, Context, Program, RenderStates, VertexBuffer, vec3};
@@ -297,6 +298,8 @@ impl ConwaysGameOfLife {
                 )
             })?;
 
+        let mut file = BufWriter::new(File::create(file)?);
+
         let current_state: Vec<u8> = self
             .conway_texture
             .get_active_mut()
@@ -304,6 +307,7 @@ impl ConwaysGameOfLife {
             .read();
 
         let num_cells = self.grid_size.x * self.grid_size.y;
+
         let mut bitified_state: Vec<u8> = Vec::new();
         let mut curr_u8 = 0u8;
         for (i, cell) in current_state.iter().enumerate() {
@@ -317,12 +321,11 @@ impl ConwaysGameOfLife {
                 curr_u8 += 1;
             }
         }
+
         if !num_cells.is_multiple_of(8) {
             curr_u8 <<= 8 - (num_cells % 8);
         }
         bitified_state.push(curr_u8);
-
-        let mut file = BufWriter::new(File::create(file)?);
 
         file.write_all(&self.grid_size.x.to_be_bytes())?;
         file.write_all(&self.grid_size.y.to_be_bytes())?;
@@ -332,7 +335,7 @@ impl ConwaysGameOfLife {
         Ok(())
     }
 
-    pub fn load(&mut self, context: &Context) -> std::io::Result<()> {
+    pub fn pick_and_load_file(&mut self, context: &Context) -> std::io::Result<()> {
         let file = rfd::FileDialog::new()
             .add_filter("conway-rs", &["conway-rs"])
             .set_title("Save State as")
@@ -344,6 +347,10 @@ impl ConwaysGameOfLife {
                 )
             })?;
 
+        self.load_file(file, context)
+    }
+
+    pub fn load_file(&mut self, file: PathBuf, context: &Context) -> std::io::Result<()> {
         let mut file = BufReader::new(File::open(file)?).bytes();
 
         macro_rules! next_byte {
@@ -372,6 +379,8 @@ impl ConwaysGameOfLife {
         self.config_grid_size = size;
         self.grid_size = size;
 
+        self.paused = true;
+
         Ok(())
     }
 
@@ -393,10 +402,9 @@ impl ConwaysGameOfLife {
 
         if self.should_load {
             self.should_load = false;
-            match self.load(&frame_input.context) {
+            match self.pick_and_load_file(&frame_input.context) {
                 Ok(()) => {
                     println!("loaded succesfully!");
-                    self.paused = true;
                 }
                 Err(e) => println!("{e}"),
             }
