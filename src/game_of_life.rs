@@ -288,7 +288,7 @@ impl ConwaysGameOfLife {
     //                 ceil((width*height)/8) bytes, last byte is padded with 0s
     pub fn save(&mut self) -> std::io::Result<()> {
         let file = rfd::FileDialog::new()
-            .add_filter("gaofli", &["conway-rs"])
+            .add_filter("gameoflife-rs", &["gameoflife-rs"])
             .set_title("Save State as")
             .save_file()
             .ok_or_else(|| {
@@ -337,7 +337,7 @@ impl ConwaysGameOfLife {
 
     pub fn pick_and_load_file(&mut self, context: &Context) -> std::io::Result<()> {
         let file = rfd::FileDialog::new()
-            .add_filter("conway-rs", &["conway-rs"])
+            .add_filter("gameoflife-rs", &["gameoflife-rs"])
             .set_title("Save State as")
             .pick_file()
             .ok_or_else(|| {
