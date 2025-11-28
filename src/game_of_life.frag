@@ -3,7 +3,7 @@ in vec2 uv_frag;
 uniform sampler2D conway;
 uniform uvec2 texture_size;
 
-out vec4 FragColor;
+out float FragColor;
 
 void main() {
     float threshold = 0.8;
@@ -11,7 +11,6 @@ void main() {
 
     // Sample the texture with the transformed UVs
     vec4 sampled_color = texture(conway, uv_frag);
-    vec4 color;
 
     bool is_alive = sampled_color.r > threshold;
 
@@ -30,10 +29,8 @@ void main() {
     }
 
     if ((is_alive && alive_neighbours == 2) || (alive_neighbours == 3)) {
-        color = vec4(1.0, 0.0, 0.0, 1.0);
+        FragColor = 1.0;
     } else {
-        color = vec4(0.0, 0.0, 0.0, 1.0);
+        FragColor = 0.0;
     }
-
-    FragColor = color;
 }

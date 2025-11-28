@@ -7,7 +7,7 @@ use winit::{
 };
 
 mod game_of_life;
-use crate::game_of_life::ConwaysGameOfLife;
+use crate::game_of_life::{GameOfLifeRunner, Operation};
 
 fn main() {
     const INIT_WINDOW_SIZE: PhysicalSize<u32> = PhysicalSize::new(1000, 1000);
@@ -28,10 +28,10 @@ fn main() {
     )
     .unwrap();
 
-    let mut conways_game_of_life = ConwaysGameOfLife::new(&context, INIT_WINDOW_SIZE);
+    let mut game_of_life_runner = GameOfLifeRunner::new(&context, INIT_WINDOW_SIZE);
 
     if let Some(file_to_load) = std::env::args().nth(1) {
-        match conways_game_of_life.load_file(file_to_load.into(), &context) {
+        match game_of_life_runner.load_file(file_to_load.into(), &context) {
             Ok(()) => {}
             Err(e) => match e.kind() {
                 std::io::ErrorKind::NotFound => println!("Couldn't load file: File not found"),
@@ -46,7 +46,7 @@ fn main() {
         Event::MainEventsCleared => window.request_redraw(),
         Event::RedrawRequested(_) => {
             let mut frame_input = frame_input_generator.generate(&context);
-            let need_redraw = conways_game_of_life.render_frame(&mut frame_input);
+            let need_redraw = game_of_life_runner.render_frame(&mut frame_input);
             if need_redraw {
                 match context.swap_buffers() {
                     Ok(()) => {}
@@ -61,11 +61,14 @@ fn main() {
             match event {
                 winit::event::WindowEvent::Resized(physical_size) => {
                     context.resize(*physical_size);
-                    conways_game_of_life.resize(*physical_size, &context);
+                    game_of_life_runner
+                        .add_operation(Operation::WindowResizeAdjust(*physical_size));
                 }
                 winit::event::WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
                     context.resize(**new_inner_size);
-                    conways_game_of_life.resize(**new_inner_size, &context);
+
+                    game_of_life_runner
+                        .add_operation(Operation::WindowResizeAdjust(**new_inner_size));
                 }
                 winit::event::WindowEvent::CloseRequested => {
                     control_flow.set_exit();
